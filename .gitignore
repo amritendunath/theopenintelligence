@@ -1,0 +1,97 @@
+# ==========================================================
+# TheOpenIntelligence — monorepo root .gitignore
+# ==========================================================
+
+# ----- Secrets / environment -----
+.env
+.env.*
+!.env.example
+*.local
+*.pem
+*.key
+secrets.json
+service-account*.json
+
+# ----- Node / Vite / React -----
+node_modules/
+**/node_modules/
+dist/
+dist-ssr/
+build/
+.vite/
+.cache/
+coverage/
+*.tsbuildinfo
+
+# ----- Logs -----
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ----- Python -----
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# ----- Docker / runtime -----
+*.pid
+docker-compose.override.yml
+
+# ----- Local runtime databases -----
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# ----- ML / data / models (large binaries) -----
+*.ckpt
+*.pt
+*.pth
+*.onnx
+*.bin
+*.h5
+*.safetensors
+
+# ----- Internal docs (business / planning / legal — do not publish) -----
+*.docx
+*.doc
+*.pdf
+*.pptx
+*.ppt
+*.xlsx
+*.xls
+
+# ----- OS files -----
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ----- Editors / IDEs -----
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ----- Local tool metadata -----
+.bolt/
+.vercel/
+.history/
