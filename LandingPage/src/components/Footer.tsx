@@ -61,7 +61,7 @@ export default function Footer() {
     {
       category: 'Agents',
       name: 'Combina',
-      url: 'https://theopenintelligence.com/combina',
+      url: 'https://combina.theopenintelligence.com',
       status: 'Live',
     },
     {
