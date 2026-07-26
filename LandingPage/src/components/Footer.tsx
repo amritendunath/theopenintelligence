@@ -57,8 +57,29 @@ export default function Footer() {
     'Incident Response',
     'Contact Support',
   ];
-  const productNames = ['Agents', 'Connectors', 'Models', 'Tools'];
-  const products = productNames.map((name) => ({ name, status: 'Coming Soon' }));
+  const products = [
+    {
+      category: 'Agents',
+      name: 'Combina',
+      url: 'https://theopenintelligence.com/combina',
+      status: 'Live',
+    },
+    {
+      category: 'Connectors',
+      name: 'Coming Soon',
+      status: 'Coming Soon',
+    },
+    {
+      category: 'Models',
+      name: 'Coming Soon',
+      status: 'Coming Soon',
+    },
+    {
+      category: 'Tools',
+      name: 'Coming Soon',
+      status: 'Coming Soon',
+    },
+  ];
 
   const termsAndPolicies = [
     'Terms of Service',
@@ -106,8 +127,20 @@ export default function Footer() {
               <h4 className="text-sm uppercase tracking-[0.1em] text-gray-100 font-semibold mb-3">Products</h4>
               <ul className="space-y-3">
                 {products.map((item) => (
-                  <li key={item.name} className="flex items-center gap-2 text-sm text-gray-400">
-                    <span>{item.name}</span>
+                  <li key={item.category} className="flex items-center gap-2 text-sm text-gray-400">
+                    <span className="text-gray-300">{item.category}:</span>
+                    {item.url ? (
+                      <a
+                        href={item.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-gray-100 hover:text-white hover:underline"
+                      >
+                        {item.name}
+                      </a>
+                    ) : (
+                      <span>{item.name}</span>
+                    )}
                     <span className="inline-flex items-center rounded-full border border-white/20 bg-white/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-gray-200">
                       {item.status}
                     </span>
