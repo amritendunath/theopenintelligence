@@ -1,0 +1,22 @@
+# Use an official Python runtime as a parent image
+FROM python:3.9-slim-buster
+
+# Set the working directory in the container
+WORKDIR /app
+ENV PYTHONPATH /app/src
+
+# Copy the requirements file
+COPY requirements.txt ./
+
+# Install any needed packages specified in requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the application code
+COPY . .
+
+# Expose the port the app runs on (defaulting to 8080 for enterprise)
+EXPOSE 8080
+
+# Define the command to start the application using the dynamic port logic in main.py
+CMD ["python", "src/main.py"]
+

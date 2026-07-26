@@ -1,0 +1,280 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'agent/**'
+      - 'auth/**' 
+      - 'nginx/**'
+      - '.github/workflows/**'
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      auth: ${{ steps.changes.outputs.auth }}
+      agent: ${{ steps.changes.outputs.agent }}
+      nginx: ${{ steps.changes.outputs.nginx }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - uses: dorny/paths-filter@v2
+        id: changes
+        with:
+          filters: |
+            auth:
+              - 'auth/**'
+            agent:
+              - 'agent/**'
+            nginx:
+              - 'nginx/**'
+
+  create_network:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH into EC2 and create network
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_KEY }}
+          script: |
+            docker network create mynet || true
+
+  deploy_databases:
+    runs-on: ubuntu-latest
+    needs: create_network
+    steps:
+      - name: Deploy Redis and Chroma to EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_KEY }}
+          script: |
+            # Deploy Redis
+            docker stop redis || true
+            docker rm redis || true
+            docker run -d --name redis \
+              --restart unless-stopped \
+              -p 6379:6379 \
+              --network mynet \
+              -v redis_data:/data \
+              redis:latest
+
+            # Deploy Chroma
+            docker stop chroma || true
+            docker rm chroma || true
+            docker run -d --name chroma \
+              --restart unless-stopped \
+              -p 8000:8000 \
+              -e ANONYMIZED_TELEMETRY=FALSE \
+              -v chroma_data:/chroma/chroma \
+              --network mynet \
+              docer1st/openlifescience_medmcqa:v1
+            
+            # Wait for databases to be ready
+            echo "Waiting for databases to be ready..."
+            sleep 10
+            
+            # Test Redis connection
+            docker exec redis redis-cli ping || true
+            
+            # Test Chroma connection (simple HTTP check)
+            docker exec chroma curl -f http://localhost:8000/api/v1/heartbeat || true
+
+            
+  deploy_auth:
+    runs-on: ubuntu-latest
+    needs: [changes, create_network, deploy_databases]
+    if: ${{ needs.changes.outputs.auth == 'true' }}
+    steps:
+      - uses: actions/checkout@v3
+      - name: Docker Login
+        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+      - name: Build and Push Auth Service
+        run: |
+          IMAGE_NAME=${{ secrets.DOCKER_USERNAME }}/auth:latest
+          docker build -t $IMAGE_NAME ./auth
+          docker push $IMAGE_NAME
+      - name: Deploy Auth Service to EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_KEY }}
+          command_timeout: 30m
+          script: |
+            docker login -u "${{ secrets.DOCKER_USERNAME }}" -p "${{ secrets.DOCKER_PASSWORD }}"
+            IMAGE_NAME=${{ secrets.DOCKER_USERNAME }}/auth:latest
+            
+            # Option 2: Generate FULL .env file from GitHub Secrets on the fly
+            mkdir -p $HOME/envs
+            cat <<'EOF' > $HOME/envs/auth.env
+            GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
+            GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}
+            JWT_SECRET=${{ secrets.JWT_SECRET }}
+            FRONTEND_URL=${{ secrets.FRONTEND_URL }}
+            GOOGLE_REDIRECT_URI=${{ secrets.GOOGLE_REDIRECT_URI }}
+            
+            TWILIO_ACCOUNT_SID=${{ secrets.TWILIO_ACCOUNT_SID }}
+            TWILIO_AUTH_TOKEN=${{ secrets.TWILIO_AUTH_TOKEN }}
+            TWILIO_VERIFY_SERVICE_ID=${{ secrets.TWILIO_VERIFY_SERVICE_ID }}
+            
+            AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
+            AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
+            AWS_REGION=${{ secrets.AWS_REGION }}
+            SES_SENDER_EMAIL=${{ secrets.SES_SENDER_EMAIL }}
+            AWS_SES=ses
+            
+            REDIS_HOST=${{ secrets.REDIS_HOST }}
+            REDIS_PORT=${{ secrets.REDIS_PORT }}
+            REDIS_DB=${{ secrets.REDIS_DB }}
+            REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
+            
+            MONGODB_URI=${{ secrets.MONGODB_URI }}
+            
+            TWITTER_CLIENT_ID=${{ secrets.TWITTER_CLIENT_ID }}
+            TWITTER_CLIENT_SECRET=${{ secrets.TWITTER_CLIENT_SECRET }}
+            MICROSOFT_CLIENT_ID=${{ secrets.MICROSOFT_CLIENT_ID }}
+            MICROSOFT_CLIENT_SECRET=${{ secrets.MICROSOFT_CLIENT_SECRET }}
+            
+            PORT=${{ secrets.PORT || '8080' }}
+            ENVIRONMENT=production
+            EOF
+
+            docker pull $IMAGE_NAME
+            docker stop auth || true
+            docker rm auth || true
+            docker run -d --name auth \
+              --restart unless-stopped \
+              --env-file $HOME/envs/auth.env \
+              --network mynet \
+              $IMAGE_NAME
+
+  deploy_agent:
+    runs-on: ubuntu-latest
+    needs: [changes, create_network, deploy_databases]
+    if: ${{ needs.changes.outputs.agent == 'true' }}
+    steps:
+      - uses: actions/checkout@v3
+      - name: Docker Login
+        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+      - name: Build and Push Agent Service
+        run: |
+          IMAGE_NAME=${{ secrets.DOCKER_USERNAME }}/agent:latest
+          docker build -t $IMAGE_NAME ./agent
+          docker push $IMAGE_NAME
+      - name: Deploy Agent Service to EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_KEY }}
+          command_timeout: 30m
+          script: |
+            docker login -u "${{ secrets.DOCKER_USERNAME }}" -p "${{ secrets.DOCKER_PASSWORD }}"
+            IMAGE_NAME=${{ secrets.DOCKER_USERNAME }}/agent:latest
+            
+            # Option 2: Generate FULL .env file from GitHub Secrets on the fly
+            mkdir -p $HOME/envs
+            cat <<'EOF' > $HOME/envs/agent.env
+            JWT_SECRET_KEY=${{ secrets.JWT_SECRET }}
+            MONGODB_URI=${{ secrets.MONGODB_URI }}
+            OPEN_API_KEY=${{ secrets.OPEN_API_KEY }}
+            OPEN_API_BASE=${{ secrets.OPEN_API_BASE }}
+            OPEN_API_MODEL_NAME_QUICK=${{ secrets.OPEN_API_MODEL_NAME_QUICK }}
+            OPEN_API_MODEL_NAME_THINK=${{ secrets.OPEN_API_MODEL_NAME_THINK }}
+            GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}
+            GEMINI_MODEL=${{ secrets.GEMINI_MODEL }}
+            LANGSMITH_TRACING=${{ secrets.LANGSMITH_TRACING }}
+            LANGCHAIN_ENDPOINT=${{ secrets.LANGCHAIN_ENDPOINT }}
+            LANGCHAIN_API_KEY=${{ secrets.LANGCHAIN_API_KEY }}
+            LANGCHAIN_PROJECT=${{ secrets.LANGCHAIN_PROJECT }}
+            AI_SEARCH_KEY=${{ secrets.AI_SEARCH_KEY }}
+            AI_SEARCH_ENDPOINT=${{ secrets.AI_SEARCH_ENDPOINT }}
+            AI_SEARCH_INDEX=${{ secrets.AI_SEARCH_INDEX }}
+            AI_SEARCH_VECTOR_SIZE=${{ secrets.AI_SEARCH_VECTOR_SIZE }}
+            AI_SEARCH_K=${{ secrets.AI_SEARCH_K }}
+            AI_SEARCH_SCORE_THRESHOLD=${{ secrets.AI_SEARCH_SCORE_THRESHOLD }}
+            AI_SEARCH_TOP_K=${{ secrets.AI_SEARCH_TOP_K }}
+            AI_SEARCH_TOP_P=${{ secrets.AI_SEARCH_TOP_P }}
+            AI_SEARCH_MAX_TOKENS=${{ secrets.AI_SEARCH_MAX_TOKENS }}
+            AI_SEARCH_TEMPERATURE=${{ secrets.AI_SEARCH_TEMPERATURE }}
+            AI_SEARCH_FREQUENCY_PENALTY=${{ secrets.AI_SEARCH_FREQUENCY_PENALTY }}
+            AI_SEARCH_PRESENCE_PENALTY=${{ secrets.AI_SEARCH_PRESENCE_PENALTY }}
+            AI_SEARCH_STOP=${{ secrets.AI_SEARCH_STOP }}
+            AI_SEARCH_STREAM=${{ secrets.AI_SEARCH_STREAM }}
+            AI_SEARCH_VERBOSE=${{ secrets.AI_SEARCH_VERBOSE }}
+            AI_SEARCH_ENGINE=${{ secrets.AI_SEARCH_ENGINE }}
+            AI_SEARCH_PROMPT=${{ secrets.AI_SEARCH_PROMPT }}
+            AI_SEARCH_PROMPT_TEMPLATE=${{ secrets.AI_SEARCH_PROMPT_TEMPLATE }}
+            AI_SEARCH_PROMPT_PREFIX=${{ secrets.AI_SEARCH_PROMPT_PREFIX }}
+            AI_SEARCH_PROMPT_SUFFIX=${{ secrets.AI_SEARCH_PROMPT_SUFFIX }}
+            AI_SEARCH_PROMPT_INPUT_VARIABLES=${{ secrets.AI_SEARCH_PROMPT_INPUT_VARIABLES }}
+            AI_SEARCH_PROMPT_OUTPUT_PARSER=${{ secrets.AI_SEARCH_PROMPT_OUTPUT_PARSER }}
+            AI_SEARCH_PROMPT_MEMORY=${{ secrets.AI_SEARCH_PROMPT_MEMORY }}
+            AI_SEARCH_PROMPT_CHAT_HISTORY=${{ secrets.AI_SEARCH_PROMPT_CHAT_HISTORY }}
+            AI_SEARCH_PROMPT_CHAT_MESSAGE_HISTORY=${{ secrets.AI_SEARCH_PROMPT_CHAT_MESSAGE_HISTORY }}
+            AI_SEARCH_PROMPT_CHAT_MESSAGE_HISTORY_INPUT_KEY=${{ secrets.AI_SEARCH_PROMPT_CHAT_MESSAGE_HISTORY_INPUT_KEY }}
+            AI_SEARCH_PROMPT_CHAT_MESSAGE_HISTORY_OUTPUT_KEY=${{ secrets.AI_SEARCH_PROMPT_CHAT_MESSAGE_HISTORY_OUTPUT_KEY }}
+            AI_SEARCH_PROMPT_CHAT_MESSAGE_HISTORY_OUTPUT_PARSER=${{ secrets.AI_SEARCH_PROMPT_CHAT_MESSAGE_HISTORY_OUTPUT_PARSER }}
+            
+            AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
+            AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
+            AWS_REGION=${{ secrets.AWS_REGION }}
+            SES_SENDER_EMAIL=${{ secrets.SES_SENDER_EMAIL }}
+            AWS_SES=${{ secrets.AWS_SES }}
+            
+            CHROMADB_HOST=${{ secrets.CHROMADB_HOST }}
+            CHROMADB_PORT=${{ secrets.CHROMADB_PORT }}
+            
+            LOCAL_URL=${{ secrets.LOCAL_URL }}
+            PROD_URL=${{ secrets.PROD_URL }}
+            
+            PORT=${{ secrets.PORT || '8080' }}
+            ENVIRONMENT=production
+            EOF
+
+            docker pull $IMAGE_NAME
+            docker stop agent || true
+            docker rm agent || true
+            docker run -d --name agent \
+              --restart unless-stopped \
+              --env-file $HOME/envs/agent.env \
+              --network mynet \
+              $IMAGE_NAME
+
+  deploy_nginx:
+    runs-on: ubuntu-latest
+    needs: [changes, create_network, deploy_databases]
+    if: ${{ needs.changes.outputs.nginx == 'true' }}
+    steps:
+      - uses: actions/checkout@v3
+      - name: Docker Login
+        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+      - name: Build and Push Nginx
+        run: |
+          IMAGE_NAME=${{ secrets.DOCKER_USERNAME }}/nginx:latest
+          docker build -t $IMAGE_NAME ./nginx
+          docker push $IMAGE_NAME
+      - name: Deploy Nginx to EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_KEY }}
+          command_timeout: 30m
+          script: |
+            docker login -u "${{ secrets.DOCKER_USERNAME }}" -p "${{ secrets.DOCKER_PASSWORD }}"
+            IMAGE_NAME=${{ secrets.DOCKER_USERNAME }}/nginx:latest
+            docker pull $IMAGE_NAME
+            docker stop nginx || true
+            docker rm nginx || true
+            docker run -d --name nginx \
+              --restart unless-stopped \
+              -p 80:80 -p 443:443 \
+              -v /etc/letsencrypt:/etc/letsencrypt:ro \
+              --network mynet \
+              $IMAGE_NAME

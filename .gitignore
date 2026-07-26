@@ -56,6 +56,8 @@ docker-compose.override.yml
 *.db-journal
 *.sqlite
 *.sqlite3
+*.db-shm
+*.db-wal
 
 # ----- ML / data / models (large binaries) -----
 *.ckpt
