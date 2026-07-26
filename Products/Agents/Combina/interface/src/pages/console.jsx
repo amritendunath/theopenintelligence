@@ -19,6 +19,7 @@ import AnimatedKnot from "../components/ui/animated_knot";
 
 
 
+
 const ChatUI = () => {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState([]);
