@@ -81,7 +81,7 @@ export default function Footer() {
     },
   ];
 
-  
+
 
   const termsAndPolicies = [
     'Terms of Service',
